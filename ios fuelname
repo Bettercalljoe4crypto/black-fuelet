@@ -1,0 +1,179 @@
+Hi team I believe having a web 2 app not been able to interact with web 3 on an iPhone it's a serious issue. 
+
+1. **Wallet Creation and Management**: Handle the user's wallet creation, storage, and security.
+2. **Blockchain Interaction**: Connect to the Fuel blockchain to handle transactions.
+3. **API Integration**: Interface with fuelname.com for domain registration.
+4. **Web3 Integration**: Connect Web3 with Web2 functionalities.
+
+Below is a simplified version of the code to demonstrate these components in Swift using a basic structure. Note: needs to be modified with the correct apis 
+
+### Prerequisites
+
+1. Install necessary dependencies using CocoaPods or Swift Package Manager.
+2. Set up an account with fuelname.com and obtain API keys if necessary.
+3. Set up a blockchain node or use a service like Infura for connecting to the Fuel blockchain.
+
+### Setting Up the Project
+
+new Swift project in Xcode and integrate necessary libraries for ex: 
+
+### Podfile
+
+```ruby
+platform :ios, '13.0'
+use_frameworks!
+
+target 'FueletWallet' do
+  pod 'web3swift'
+  pod 'Alamofire' # For networking
+end
+```
+
+### Wallet Manager
+
+class to handle wallet functionalities.
+
+```swift
+import Foundation
+import web3swift
+
+class WalletManager {
+    static let shared = WalletManager()
+    private var keystoreManager: KeystoreManager?
+
+    private init() {
+        loadKeystore()
+    }
+
+    func createNewWallet(password: String) -> String? {
+        do {
+            let keystore = try EthereumKeystoreV3(password: password)
+            guard let keystore = keystore else { return nil }
+            let keystoreManager = KeystoreManager([keystore])
+            self.keystoreManager = keystoreManager
+            saveKeystore(keystore)
+            return keystore.addresses?.first?.address
+        } catch {
+            print("Error creating wallet: \(error)")
+            return nil
+        }
+    }
+
+    private func saveKeystore(_ keystore: EthereumKeystoreV3) {
+        // Save keystore to secure storage
+    }
+
+    private func loadKeystore() {
+        // Load keystore from secure storage
+    }
+
+    func getWalletAddress() -> String? {
+        return keystoreManager?.addresses?.first?.address
+    }
+}
+```
+
+### Blockchain Interaction
+
+to send transactions.
+
+```swift
+import web3swift
+import BigInt
+
+class BlockchainService {
+    static let shared = BlockchainService()
+    private let web3 = Web3.InfuraRinkebyWeb3() // Change to your node
+
+    func sendTransaction(from: String, to: String, amount: BigUInt, password: String, completion: @escaping (Result<String, Error>) -> Void) {
+        guard let senderAddress = EthereumAddress(from),
+              let receiverAddress = EthereumAddress(to) else {
+            completion(.failure(NSError(domain: "Invalid address", code: -1, userInfo: nil)))
+            return
+        }
+
+        do {
+            let keystoreManager = WalletManager.shared.keystoreManager
+            web3.addKeystoreManager(keystoreManager)
+
+            var options = TransactionOptions.defaultOptions
+            options.from = senderAddress
+            options.value = amount
+
+            let intermediateSend = web3.eth.sendETH(to: receiverAddress, amount: amount, extraData: Data(), options: options)
+            let result = try intermediateSend?.send(password: password)
+
+            if let txHash = result?.transaction.txhash {
+                completion(.success(txHash))
+            } else {
+                completion(.failure(NSError(domain: "Transaction failed", code: -1, userInfo: nil)))
+            }
+        } catch {
+            completion(.failure(error))
+        }
+    }
+}
+```
+
+### Step 5: API Integration
+
+Integrate with fuelname.com API to buy a domain.
+
+```swift
+import Alamofire
+
+class FuelNameService {
+    static let shared = FuelNameService()
+    private let baseURL = "https://api.fuelname.com"
+
+    func buyDomain(domain: String, walletAddress: String, completion: @escaping (Result<String, Error>) -> Void) {
+        let endpoint = "\(baseURL)/buy"
+        let parameters: [String: Any] = ["domain": domain, "walletAddress": walletAddress]
+
+        AF.request(endpoint, method: .post, parameters: parameters, encoding: JSONEncoding.default)
+            .responseJSON { response in
+                switch response.result {
+                case .success(let data):
+                    if let json = data as? [String: Any], let txHash = json["txHash"] as? String {
+                        completion(.success(txHash))
+                    } else {
+                        completion(.failure(NSError(domain: "Invalid response", code: -1, userInfo: nil)))
+                    }
+                case .failure(let error):
+                    completion(.failure(error))
+                }
+            }
+    }
+}
+```
+
+### Step 6: Connecting Web3 and Web2
+
+Create a simple UI to connect the wallet and buy a domain.
+
+```swift
+import UIKit
+
+class ViewController: UIViewController {
+    @IBOutlet weak var domainTextField: UITextField!
+    @IBOutlet weak var passwordTextField: UITextField!
+    @IBOutlet weak var resultLabel: UILabel!
+
+    @IBAction func buyDomainTapped(_ sender: UIButton) {
+        guard let domain = domainTextField.text, !domain.isEmpty,
+              let password = passwordTextField.text, !password.isEmpty else {
+            resultLabel.text = "Please enter all details."
+            return
+        }
+
+        let walletAddress = WalletManager.shared.getWalletAddress() ?? ""
+        FuelNameService.shared.buyDomain(domain: domain, walletAddress: walletAddress) { result in
+            switch result {
+            case .success(let txHash):
+                self.resultLabel.text = "Domain bought successfully. TX Hash: \(txHash)"
+            case .failure(let error):
+                self.resultLabel.text = "Failed to buy domain: \(error.localizedDescription)"
+            }
+        }
+    }
+}
